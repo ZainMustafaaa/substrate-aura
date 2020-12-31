@@ -1,6 +1,6 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
-use frame_support::{debug ,decl_module, dispatch::{DispatchResult,Vec}, weights::{Weight},decl_storage, decl_event, decl_error, dispatch, 
+use frame_support::{debug ,decl_module, dispatch::{DispatchResult,Vec}, weights::{Weight},decl_storage, decl_event, decl_error, dispatch,
 traits::{Get, Currency, OriginTrait}};
 
 use frame_system::{ensure_signed, ensure_root};
@@ -8,9 +8,9 @@ use super::Aura;
 use sp_core::{
 	crypto::{Public as _},
 	H256,
-	H512,
 	sr25519::{Public, Signature},
 };
+use codec::{Encode, Decode};
 
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;// use super::{block_author::BlockAuthor, issuance::Issuance};
 
@@ -23,6 +23,7 @@ type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trai
 pub trait Trait: frame_system::Trait {
 	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 	type Currency: Currency<Self::AccountId>;
+	type RewardAmount: Get<BalanceOf<Self>>;
 }
 
 decl_storage! {
@@ -33,9 +34,13 @@ decl_storage! {
 }
 
 decl_event!(
-	pub enum Event<T> where AccountId = <T as frame_system::Trait>::AccountId {
+	pub enum Event<T>
+	where
+		AccountId = <T as frame_system::Trait>::AccountId,
+		Balance = BalanceOf<T>,
+	{
 		SomethingStored( AccountId),
-		// RewardsIssued(BalanceOf<T>),
+		RewardsIssued(AccountId, Balance),
 	}
 );
 
@@ -55,41 +60,22 @@ decl_module! {
 		// Events must be initialized if they are used by the pallet.
 		fn deposit_event() = default;
 
-		/// An example dispatchable that takes a singles value as a parameter, writes the value to
-		/// storage and emits an event. This function must be dispatched by a signed extrinsic.
-		#[weight = 10_000 + T::DbWeight::get().writes(1)]
-		pub fn do_something(origin, something: BalanceOf<T>) -> dispatch::DispatchResult {
-			// Check that the extrinsic was signed and get the signer.
-			// This function will return an error if the extrinsic is not signed.
-			// https://substrate.dev/docs/en/knowledgebase/runtime/origin
-			let who = ensure_root(origin)?;
-
-			// Update storage.
-			Something::<T>::put(something);
-
-			// Emit an event.
-            // Self::deposit_event(RawEvent::SomethingStored(who));
-            
-			// Return a successful DispatchResult
-			Ok(())
-		}
-
 		fn on_finalize(block: T::BlockNumber) {
 		    debug::info!("===================================================");
 			debug::info!("Current Block From Reward Runtime :# {:?}",  block);
-			debug::info!("===================================================");			
+			debug::info!("===================================================");
 			debug::info!("Aura Authorities array :  {:?}", Aura::authorities().iter());
-			debug::info!("===================================================");			
-	
-			let auth:Vec<_> = Aura::authorities().iter().map(|x| {
+			debug::info!("===================================================");
+
+			let auth:Vec<H256> = Aura::authorities().iter().map(|x| {
                 let r: &Public = x.as_ref();
                 r.0.into()
 			}).collect();
-			
+
 			Self::disperse_reward(&auth);
 
 		}
-		
+
 	}
 }
 
@@ -98,15 +84,20 @@ impl<T: Trait> Module<T> {
 	fn disperse_reward(to_reward: &[H256]) {
 		debug::info!("My Authorities Inside the desperss method: {:?}", to_reward);
 
-		// let mut reward: BalanceOf<T> = Something::<T>::get();
-		let mut reward = BalanceOf::<T>::from(100);
-		Something::<T>::put(reward);
-		
+		let reward = T::RewardAmount::get();
+
 		debug::info!("My reward on finalize after upgrading the storage and increment: {:?}", reward);
-		for who in to_reward { 
-			Currency::deposit_into_existing(&who, reward).ok();
-			// Self::deposit_event(RawEvent::RewardsIssued(reward));
+		for who in to_reward {
+			// Assume each H256 correctly encodes an AccountId
+			let bytes = who.encode();
+			// Force the H256 to the AccountId type, if that decoding fails, use default AccountId instead.
+			let account = T::AccountId::decode(&mut &bytes[..]).unwrap_or_default();
+			// Ignore any errors from this call, not much we can do about that.
+			match T::Currency::deposit_into_existing(&account, reward) {
+				Ok(_) => Self::deposit_event(RawEvent::RewardsIssued(account, reward)),
+				_ => {}
+			};
 		}
-		
-	}	
+
+	}
 }
