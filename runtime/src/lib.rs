@@ -310,9 +310,15 @@ impl pallet_transaction_payment::Trait for Runtime {
 	type WeightToFee = IdentityFee<Balance>;
 	type FeeMultiplierUpdate = ();
 }
+
+parameter_types! {
+	pub const RewardAmount: Balance = 100;
+}
+
 impl reward::Trait for Runtime {
 	type Event = Event;
 	type Currency = Balances;
+	type RewardAmount = RewardAmount;
 }
 
 impl pallet_sudo::Trait for Runtime {
